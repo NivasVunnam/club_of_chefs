@@ -258,18 +258,7 @@ function App() {
   };
 
   const handleLogout = () => {
-    const userStateKeys = [
-      'clubAuthUser',
-      'savedRecipes',
-      'userPoints',
-      'earnedBadges',
-      'favoriteChefIds',
-      'inProgressRecipeIds',
-      'recentRecipeIds',
-      'recipeProcessProgress',
-      'newsReactionUserId',
-    ];
-    userStateKeys.forEach((key) => localStorage.removeItem(key));
+    localStorage.removeItem('clubAuthUser');
     sessionStorage.removeItem('returnToRecipePath');
     sessionStorage.removeItem('returnToChefsSection');
     sessionStorage.removeItem('returnToNewsSection');
@@ -284,7 +273,7 @@ function App() {
     setEarnedBadges([]);
     setCompletedRecipesCount(0);
     setIsMenuOpen(false);
-    window.location.replace('/login');
+    navigate('/login', { replace: true });
   };
 
   const toggleFavoriteChef = (chefId: string) => {
