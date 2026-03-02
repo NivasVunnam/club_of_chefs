@@ -1,4 +1,3 @@
-import { PGlite } from '@electric-sql/pglite';
 import { badges, chefs, editorialArticles, newsArticles, recipes } from '../src/data/index.ts';
 import type { EditorialArticle, NewsArticle } from '../src/types/index.ts';
 
@@ -10,13 +9,61 @@ export type AppContent = {
   badges: typeof badges;
 };
 
-const db = new PGlite('./.pglite-data');
+type QueryResult<T> = { rows: T[] };
+
+interface DbAdapter {
+  query<T = unknown>(sql: string, params?: unknown[]): Promise<QueryResult<T>>;
+  exec(sql: string): Promise<void>;
+}
+
+async function createDb(): Promise<DbAdapter> {
+  const databaseUrl = process.env.DATABASE_URL;
+
+  if (databaseUrl) {
+    // Production: use real PostgreSQL (e.g. Render Postgres, Supabase, etc.)
+    const { Pool } = await import('pg');
+    const pool = new Pool({
+      connectionString: databaseUrl,
+      ssl: databaseUrl.includes('localhost') ? false : { rejectUnauthorized: false },
+    });
+
+    return {
+      async query<T>(sql: string, params?: unknown[]): Promise<QueryResult<T>> {
+        const result = await pool.query(sql, params ?? []);
+        return { rows: (result.rows ?? []) as T[] };
+      },
+      async exec(sql: string): Promise<void> {
+        const statements = sql
+          .split(';')
+          .map((s) => s.trim())
+          .filter((s) => s.length > 0);
+        for (const statement of statements) {
+          await pool.query(statement + ';');
+        }
+      },
+    };
+  }
+
+  // Local dev: use PGLite (WASM) — avoid on Render/cloud to prevent WASM abort
+  const { PGlite } = await import('@electric-sql/pglite');
+  const pglite = new PGlite('./.pglite-data');
+
+  return {
+    async query<T>(sql: string, params?: unknown[]): Promise<QueryResult<T>> {
+      return pglite.query(sql, params ?? []) as Promise<QueryResult<T>>;
+    },
+    async exec(sql: string): Promise<void> {
+      await pglite.exec(sql);
+    },
+  };
+}
+
+let db!: DbAdapter;
 
 type ReactionType = 'like' | 'dislike' | 'none';
 type ArticleActionType = 'preorder' | 'order' | 'register' | 'notify' | 'guide';
 
-async function ensureSchema() {
-  await db.exec(`
+const SCHEMA_SQL = `
     CREATE TABLE IF NOT EXISTS app_content (
       key TEXT PRIMARY KEY,
       payload JSONB NOT NULL
@@ -46,7 +93,10 @@ async function ensureSchema() {
       action TEXT NOT NULL CHECK (action IN ('preorder', 'order', 'register', 'notify', 'guide')),
       PRIMARY KEY (article_id, user_id)
     );
-  `);
+  `;
+
+async function ensureSchema() {
+  await db.exec(SCHEMA_SQL);
 }
 
 async function syncSeedData() {
@@ -106,6 +156,7 @@ async function ensureNewsMetaRows() {
 }
 
 export async function initDb() {
+  db = await createDb();
   await ensureSchema();
   await syncSeedData();
   await ensureNewsMetaRows();
